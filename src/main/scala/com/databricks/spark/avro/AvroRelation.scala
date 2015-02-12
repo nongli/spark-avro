@@ -46,12 +46,12 @@ case class AvroRelation(location: String)(@transient val sqlContext: SQLContext)
     convertedSchema
   }
 
-  /** 
+  /**
    * There are several properties of Avro that we have to account for in this method:
    * 1) Avro uses Utf8 strings, so we want to convert them to java.lang.String for SparkSQL,
    *    including making the appropriate recursive calls.
    * 2) Avro map keys are always strings, so we don't need to recurse on them when processing maps.
-   * 3) Byte arrays and ByteBuffers are reused by Avro, so we must copy them out. 
+   * 3) Byte arrays and ByteBuffers are reused by Avro, so we must copy them out.
    */
   private def convertToSparkSQL(obj: Any): Any = {
     obj match {
@@ -71,7 +71,7 @@ case class AvroRelation(location: String)(@transient val sqlContext: SQLContext)
         f.bytes.clone
       case e: EnumSymbol =>
         e.toString
-      case r: Record => 
+      case r: Record =>
         Row.fromSeq((0 until r.getSchema.getFields.size).map { i =>
           convertToSparkSQL(r.get(i))
         })
@@ -106,15 +106,16 @@ case class AvroRelation(location: String)(@transient val sqlContext: SQLContext)
     val path = new Path(location)
     val fs = FileSystem.get(path.toUri, sqlContext.sparkContext.hadoopConfiguration)
 
-    val status = fs.getFileStatus(path)
-    val singleFile = if (status.isDir) {
-      fs.listStatus(path)
-        .find(_.getPath.toString endsWith "avro")
-        .map(_.getPath)
-        .getOrElse(sys.error(s"Could not find .avro file with schema at $path"))
-    } else {
-      path
+    val files = fs.globStatus(path)
+      .flatMap {
+          status => if(status.isDir) fs.listStatus(status.getPath) else List(status) }
+      .map(_.getPath)
+
+    if (files.size == 0) {
+      sys.error(s"Could not find any files at $path")
     }
+
+    val singleFile = files(0)
     val input = new FsInput(singleFile, sqlContext.sparkContext.hadoopConfiguration)
     val reader = new GenericDatumReader[GenericRecord]()
     DataFileReader.openReader(input, reader)
